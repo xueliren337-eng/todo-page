@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>跨端待办</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+body{background:#f7f8fa;color:#222;padding:14px;max-width:960px;margin:0 auto}
+.container{display:flex;flex-direction:column;gap:16px}
+.sidebar{background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 4px #00000010}
+.main{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px #00000010}
+h2{font-size:17px;margin-bottom:6px}
+.date-text{font-size:14px;color:#666;margin-bottom:14px}
+.side-item{padding:10px 6px;border-radius:6px;margin-bottom:4px;cursor:pointer;font-size:14px}
+.side-item.active{background:#eef4ff;color:#2b65ec}
+.search{width:100%;padding:11px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:14px;outline:none;font-size:16px}
+.stats{display:flex;gap:14px;font-size:13px;color:#666;margin-bottom:10px}
+.ctrl-bar{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.ctrl-bar button{padding:8px 10px;border:1px solid #ddd;background:#fff;border-radius:6px;cursor:pointer;font-size:12px}
+.task-item{display:flex;align-items:flex-start;gap:10px;padding:14px 0;border-bottom:1px solid #f1f1f1}
+.task-info{flex:1}
+.task-title{font-size:15px;margin-bottom:4px}
+.task-note{font-size:12px;color:#777;margin-bottom:4px}
+.task-bottom{display:flex;gap:6px;font-size:11px;color:#666;flex-wrap:wrap}
+.tag{padding:2px 6px;border-radius:4px;color:#fff}
+.tag-study{background:#9368e9}
+.tag-work{background:#3671e9}
+.tag-life{background:#36b37e}
+.tag-project{background:#f56c6c}
+.pri-high{background:#f56c6c;color:#fff}
+.pri-mid{background:#ff9500;color:#fff}
+.pri-low{background:#9499a3;color:#fff}
+.time-tag{background:#f0f0f0;color:#444}
+.add-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;align-items:center}
+#addInput,#noteInput{padding:11px 12px;border:1px solid #e5e7eb;border-radius:8px;outline:none;font-size:16px;flex:1;min-width:120px}
+#selCat,#selPri,#remindTime,#deadline{padding:11px;border:1px solid #e5e7eb;border-radius:8px;font-size:15px}
+#addBtn{padding:11px 14px;border:none;background:#2b65ec;color:#fff;border-radius:8px;cursor:pointer;font-size:15px}
+.done .task-title{text-decoration:line-through;color:#999}
+input[type="checkbox"]{transform:scale(1.25)}
+.sync-tip{font-size:12px;color:#2b65ec;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="sidebar">
+    <h2>分类</h2>
+    <div class="side-item active" data-cat="all">全部</div>
+    <div class="side-item" data-cat="work">🔵 工作</div>
+    <div class="side-item" data-cat="study">🟣 学习</div>
+    <div class="side-item" data-cat="life">🟢 生活</div>
+    <div class="side-item" data-cat="project">🔴 项目</div>
+  </div>
+  <div class="main">
+    <div class="sync-tip" id="syncTip">🔄 同步中...</div>
+    <h2>今日待办</h2>
+    <div class="date-text" id="nowDate"></div>
+    <input class="search" id="search" placeholder="搜索标题、备注...">
+    <div class="stats">
+      <span>总数：<span id="total">0</span></span>
+      <span>已完成：<span id="done">0</span></span>
+    </div>
+    <div class="ctrl-bar">
+      <button onclick="clearDone()">清除已完成</button>
+      <button onclick="exportData()">导出备份</button>
+      <button onclick="clearAll()">清空全部</button>
+      <button onclick="pullRemote()">刷新云端</button>
+    </div>
+    <div id="list"></div>
+    <div class="add-row">
+      <input id="addInput" placeholder="任务名称">
+      <input id="noteInput" placeholder="备注">
+      <select id="selCat">
+        <option value="work">工作</option>
+        <option value="study">学习</option>
+        <option value="life">生活</option>
+        <option value="project">项目</option>
+      </select>
+      <select id="selPri">
+        <option value="low">低优先级</option>
+        <option value="mid">中优先级</option>
+        <option value="high">高优先级</option>
+      </select>
+      <input type="datetime-local" id="deadline">
+      <button id="addBtn">添加任务</button>
+    </div>
+  </div>
+</div>
+<script>
+// ========== 这里已经填好你的信息 ==========
+const GIST_RAW_URL = "https://gist.githubusercontent.com/xueliren337-eng/d9cc5b655e0c9b53db33f0e780b81182/raw/ad11ee7ba69f5220c649f31363d3ba313c85bfce/todo.json";
+const GIST_API_URL = "https://api.github.com/gists/d9cc5b655e0c9b53db33f0e780b81182";
+const GIST_TOKEN = "ghp_AE38CXHqYIjkXA1mBfxU1QK8edDjeY247A70";
+// =======================================
+let todoList = [];
+let currentCat = "all";
+const syncTip = document.getElementById("syncTip");
+const listEl = document.getElementById("list");
+const totalEl = document.getElementById("total");
+const doneEl = document.getElementById("done");
+const addInput = document.getElementById("addInput");
+const noteInput = document.getElementById("noteInput");
+const selCat = document.getElementById("selCat");
+const selPri = document.getElementById("selPri");
+const deadline = document.getElementById("deadline");
+const addBtn = document.getElementById("addBtn");
+const search = document.getElementById("search");
+document.querySelectorAll(".side-item").forEach(el=>{
+  el.onclick = ()=>{
+    document.querySelectorAll(".side-item").forEach(i=>i.classList.remove("active"));
+    el.classList.add("active");
+    currentCat = el.dataset.cat;
+    render();
+  }
+})
+addBtn.onclick = addTodo;
+search.oninput = render;
+function showTip(text){
+  syncTip.innerText = text;
+  setTimeout(()=>syncTip.innerText="",2500);
+}
+async function pullRemote(){
+  try{
+    const res = await fetch(GIST_RAW_URL);
+    todoList = await res.json();
+    render();
+    showTip("✅ 从云端拉取成功");
+  }catch(e){
+    showTip("❌ 拉取失败");
+    console.error(e);
+  }
+}
+async function pushRemote(){
+  try{
+    const body = {files:{"todo.json":{content:JSON.stringify(todoList,null,2)}}};
+    const res = await fetch(GIST_API_URL,{
+      method:"PATCH",
+      headers:{"Authorization":"token "+GIST_TOKEN,"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
+    if(!res.ok) throw new Error("http error");
+    showTip("✅ 自动同步到云端");
+  }catch(e){
+    showTip("❌ 同步失败");
+    console.error(e);
+  }
+}
+function addTodo(){
+  const title = addInput.value.trim();
+  if(!title) return;
+  todoList.push({
+    id:Date.now(),
+    title,
+    note:noteInput.value.trim(),
+    cat:selCat.value,
+    pri:selPri.value,
+    deadline:deadline.value,
+    done:false
+  })
+  addInput.value="";noteInput.value="";deadline.value="";
+  render();
+  pushRemote();
+}
+function toggleTodo(id){
+  const item = todoList.find(x=>x.id===id);
+  if(item){item.done=!item.done;render();pushRemote();}
+}
+function delTodo(id){
+  todoList = todoList.filter(x=>x.id!==id);
+  render();pushRemote();
+}
+function clearDone(){
+  todoList = todoList.filter(x=>!x.done);
+  render();pushRemote();
+}
+function clearAll(){
+  if(!confirm("确定清空全部？"))return;
+  todoList=[];render();pushRemote();
+}
+function exportData(){
+  const blob = new Blob([JSON.stringify(todoList,null,2)],{type:"application/json"});
+  const a = document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="todo_backup.json";
+  a.click();
+}
+function render(){
+  const kw = search.value.toLowerCase();
+  let arr = todoList.filter(it=>{
+    if(currentCat!=="all" && it.cat!==currentCat) return false;
+    if(kw && !it.title.toLowerCase().includes(kw) && !it.note.toLowerCase().includes(kw)) return false;
+    return true;
+  })
+  listEl.innerHTML = arr.map(it=>`
+    <div class="task-item ${it.done?'done':''}">
+      <input type="checkbox" ${it.done?"checked":""} onchange="toggleTodo(${it.id})">
+      <div class="task-info">
+        <div class="task-title">${it.title}</div>
+        <div class="task-note">${it.note||""}</div>
+        <div class="task-bottom">
+          <span class="tag tag-${it.cat}">${it.cat}</span>
+          <span class="pri-${it.pri}">${it.pri}</span>
+          ${it.deadline?`<span class="time-tag">${it.deadline}</span>`:""}
+        </div>
+      </div>
+      <button onclick="delTodo(${it.id})">删除</button>
+    </div>`).join("");
+  totalEl.innerText = todoList.length;
+  doneEl.innerText = todoList.filter(x=>x.done).length;
+}
+pullRemote();
+</script>
+</body>
+</html>
